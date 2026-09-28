@@ -587,16 +587,16 @@
 
         // ── Kontrol Aktuator → Tulis ke Firebase ─────────────────────
         async function switchMode(mode) {
-            // Optimistic update: UI langsung berubah tanpa nunggu Firebase
-            envData.actuators = { ...(envData.actuators || {}), mode: mode.toUpperCase() };
+            const upperMode = mode.toUpperCase();
+            envData.actuators = { ...(envData.actuators || {}), mode: upperMode };
             updateActuatorUI(envData.actuators);
 
             try {
-                await update(ref(db, 'mushroom_environment/actuators'), { mode: mode.toUpperCase() });
+                await update(ref(db, 'mushroom_environment/actuators'), { mode: upperMode });
             } catch (e) {
                 console.warn('Firebase switchMode gagal, fallback ke API:', e);
                 try {
-                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: upperMode }) });
                     const data = await res.json();
                     if (data.success) renderUI(data.environment);
                 } catch (e2) { console.error('Fallback API juga gagal:', e2); }
@@ -604,17 +604,26 @@
         }
 
         async function toggleActuator(actuator, value) {
-            // Optimistic update: UI langsung berubah + mode otomatis MANUAL
             envData.actuators = { ...(envData.actuators || {}), [actuator]: value, mode: 'MANUAL' };
             updateActuatorUI(envData.actuators);
 
             try {
-                const updates = { [actuator]: value, mode: 'MANUAL' };
-                await update(ref(db, 'mushroom_environment/actuators'), updates);
+                const updates = { 
+                    [`mushroom_environment/actuators/${actuator}`]: value,
+                    'mushroom_environment/actuators/mode': 'MANUAL'
+                };
+                const fan = !!envData.actuators.fan;
+                const humidifier = !!envData.actuators.humidifier;
+                updates['mushroom_environment/status'] = {
+                    condition: 'Manual Control',
+                    message: `Mode MANUAL Aktif: Kipas ${fan ? 'NYALA' : 'MATI'}, Humidifier ${humidifier ? 'NYALA' : 'MATI'}.`
+                };
+
+                await update(ref(db), updates);
             } catch (e) {
                 console.warn('Firebase toggleActuator gagal, fallback ke API:', e);
                 try {
-                    const body = { [actuator]: value };
+                    const body = { [actuator]: value, mode: 'MANUAL' };
                     const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                     const data = await res.json();
                     if (data.success) renderUI(data.environment);
