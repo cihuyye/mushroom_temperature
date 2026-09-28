@@ -1,0 +1,132 @@
+{
+    "mushroom_environment": {
+        "sensor": {
+            "temperature": 26.5,
+            "humidity": 85,
+            "updated_at": 1790611914
+        },
+        "actuators": {
+            "fan": false,
+            "humidifier": false,
+            "mode": "AUTO"
+        },
+        "status": {
+            "condition": "Ideal",
+            "message": "Suhu (26.5\u00b0C) & Kelembapan (85%) optimal. Kipas & Humidifier MATI (Kondisi Stabil)."
+        },
+        "history": {
+            "rec_1": {
+                "temperature": 24.2,
+                "humidity": 88,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727510400,
+                "formatted_time": "08:00:00"
+            },
+            "rec_2": {
+                "temperature": 25.1,
+                "humidity": 87.5,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727514000,
+                "formatted_time": "09:00:00"
+            },
+            "rec_3": {
+                "temperature": 26,
+                "humidity": 86,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727517600,
+                "formatted_time": "10:00:00"
+            },
+            "rec_4": {
+                "temperature": 27.4,
+                "humidity": 83.2,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727521200,
+                "formatted_time": "11:00:00"
+            },
+            "rec_5": {
+                "temperature": 28.8,
+                "humidity": 78.5,
+                "fan": true,
+                "humidifier": true,
+                "timestamp": 1727524800,
+                "formatted_time": "12:00:00"
+            },
+            "rec_6": {
+                "temperature": 27.2,
+                "humidity": 84,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727528400,
+                "formatted_time": "13:00:00"
+            },
+            "rec_7": {
+                "temperature": 26.8,
+                "humidity": 86.5,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727532000,
+                "formatted_time": "14:00:00"
+            },
+            "rec_8": {
+                "temperature": 26.5,
+                "humidity": 85,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1727539200,
+                "formatted_time": "15:00:00"
+            },
+            "record_1790610516": {
+                "temperature": 32,
+                "humidity": 65,
+                "fan": true,
+                "humidifier": true,
+                "timestamp": 1790610516,
+                "formatted_time": "15:48:36"
+            },
+            "record_1790610534": {
+                "temperature": 26.5,
+                "humidity": 85,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1790610534,
+                "formatted_time": "15:48:54"
+            },
+            "record_1790610731": {
+                "temperature": 31,
+                "humidity": 85,
+                "fan": true,
+                "humidifier": false,
+                "timestamp": 1790610731,
+                "formatted_time": "15:52:11"
+            },
+            "record_1790610755": {
+                "temperature": 25.5,
+                "humidity": 85,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1790610755,
+                "formatted_time": "15:52:35"
+            },
+            "record_1790611912": {
+                "temperature": 26.5,
+                "humidity": 85,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1790611912,
+                "formatted_time": "16:11:52"
+            },
+            "record_1790611914": {
+                "temperature": 26.5,
+                "humidity": 85,
+                "fan": false,
+                "humidifier": false,
+                "timestamp": 1790611914,
+                "formatted_time": "16:11:54"
+            }
+        }
+    }
+}
