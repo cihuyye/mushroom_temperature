@@ -188,7 +188,7 @@
                     </div>
 
                     <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="toggleFan" onchange="toggleActuator('fan', this.checked)" class="sr-only peer">
+                        <input type="checkbox" id="toggleFan" class="sr-only peer">
                         <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
                     </label>
                 </div>
@@ -212,7 +212,7 @@
                     </div>
 
                     <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" id="toggleHumidifier" onchange="toggleActuator('humidifier', this.checked)" class="sr-only peer">
+                        <input type="checkbox" id="toggleHumidifier" class="sr-only peer">
                         <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
                     </label>
                 </div>
@@ -228,10 +228,10 @@
                 <span id="modeBadgeText" class="text-slate-400 font-medium ml-2">AUTO (Otomatis Sensor)</span>
             </div>
             <div class="flex items-center gap-2 bg-slate-900 p-1 rounded-xl">
-                <button id="btnAuto" onclick="switchMode('AUTO')" class="px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all">
+                <button id="btnAuto" class="px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all">
                     AUTO
                 </button>
-                <button id="btnManual" onclick="switchMode('MANUAL')" class="px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all">
+                <button id="btnManual" class="px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all">
                     MANUAL
                 </button>
             </div>
@@ -329,55 +329,121 @@
 
     </main>
 
-    <!-- Script Logic -->
-    <script>
+    <!-- Script Logic (Firebase Realtime Database + Chart.js) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, onValue, update, query, limitToLast, connectDatabaseEmulator } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // ── Firebase Config ──────────────────────────────────────────
+        const firebaseConfig = {
+            apiKey: "AIzaSyCkF_T6BXW0deHfe3YK1WF-jn7U-HvwODg",
+            authDomain: "mushroom-monitoring-831ed.firebaseapp.com",
+            databaseURL: "https://mushroom-monitoring-831ed-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "mushroom-monitoring-831ed",
+            storageBucket: "mushroom-monitoring-831ed.firebasestorage.app",
+            messagingSenderId: "700912167030",
+            appId: "1:700912167030:web:e946682a3d3e2911f2d757",
+            measurementId: "G-7ZWC1FXVJ6"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // ── State Lokal ───────────────────────────────────────────────
         let envData = @json($initialData);
         let historyChart = null;
         let autoStreamInterval = null;
 
+        // ── Inisialisasi Halaman ──────────────────────────────────────
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
             updateClock();
             setInterval(updateClock, 1000);
-
             initChart();
-            renderUI(envData);
+            renderUI(envData); // Tampilkan data awal dari PHP/data.json
 
-            // Poll live data every 2 seconds
-            setInterval(fetchLiveData, 2000);
+            startFirebaseListeners(); // Lalu langsung sync ke Firebase
+
+            // ── Event Listeners (lebih reliable dari onclick di module script)
+            document.getElementById('btnAuto').addEventListener('click', () => switchMode('AUTO'));
+            document.getElementById('btnManual').addEventListener('click', () => switchMode('MANUAL'));
+            document.getElementById('toggleFan').addEventListener('change', function() { toggleActuator('fan', this.checked); });
+            document.getElementById('toggleHumidifier').addEventListener('change', function() { toggleActuator('humidifier', this.checked); });
         });
 
         function updateClock() {
             document.getElementById('headerClock').innerText = new Date().toLocaleTimeString('id-ID');
         }
 
-        async function fetchLiveData() {
-            try {
-                const res = await fetch('/api/mushroom-data');
-                if (res.ok) {
-                    envData = await res.json();
-                    renderUI(envData);
-                    document.getElementById('syncStatus').innerText = 'Terhubung';
-                    document.getElementById('syncStatus').className = 'text-emerald-400 font-semibold';
+        // ── Firebase Realtime Listeners ───────────────────────────────
+        function startFirebaseListeners() {
+            // 1. Sensor (suhu & kelembapan)
+            onValue(ref(db, 'mushroom_environment/sensor'), (snap) => {
+                const data = snap.val();
+                if (data) {
+                    envData.sensor = data;
+                    updateSensorUI(data);
+                    updateSyncStatus(true);
                 }
-            } catch (err) {
-                document.getElementById('syncStatus').innerText = 'Offline';
-                document.getElementById('syncStatus').className = 'text-rose-400 font-semibold';
+            }, () => updateSyncStatus(false));
+
+            // 2. Status kondisi lingkungan
+            onValue(ref(db, 'mushroom_environment/status'), (snap) => {
+                const data = snap.val();
+                if (data) {
+                    envData.status = data;
+                    updateStatusUI(data);
+                }
+            });
+
+            // 3. Aktuator (kipas, humidifier, mode)
+            onValue(ref(db, 'mushroom_environment/actuators'), (snap) => {
+                const data = snap.val();
+                if (data) {
+                    envData.actuators = data;
+                    updateActuatorUI(data);
+                }
+            });
+
+            // 4. Histori (20 data terakhir untuk grafik)
+            const historyQ = query(ref(db, 'mushroom_environment/history'), limitToLast(20));
+            onValue(historyQ, (snap) => {
+                const history = {};
+                snap.forEach(child => { history[child.key] = child.val(); });
+                envData.history = history;
+                updateChart(history);
+            });
+        }
+
+        function updateSyncStatus(connected) {
+            const el = document.getElementById('syncStatus');
+            if (connected) {
+                el.innerText = 'Firebase Terhubung';
+                el.className = 'text-emerald-400 font-semibold';
+                const now = new Date().toLocaleTimeString('id-ID');
+                document.getElementById('lastUpdated').innerText = 'Baru saja (' + now + ')';
+            } else {
+                el.innerText = 'Offline';
+                el.className = 'text-rose-400 font-semibold';
             }
         }
 
+        // ── Render UI ─────────────────────────────────────────────────
         function renderUI(data) {
             if (!data) return;
+            updateSensorUI(data.sensor || {});
+            updateStatusUI(data.status || {});
+            updateActuatorUI(data.actuators || {});
+            updateChart(data.history || {});
+        }
 
-            const temp = parseFloat(data.sensor?.temperature || 26.5);
-            const hum = parseFloat(data.sensor?.humidity || 85.0);
-            const status = data.status || {};
-            const actuators = data.actuators || {};
+        function updateSensorUI(sensor) {
+            const temp = parseFloat(sensor.temperature ?? 26.5);
+            const hum  = parseFloat(sensor.humidity ?? 85.0);
 
-            // 1. Suhu & Kelembapan
             document.getElementById('valTemp').innerText = temp.toFixed(1);
             document.getElementById('barTemp').style.width = Math.min(Math.max(((temp - 15) / 25) * 100, 0), 100) + '%';
-            
+
             const tempBadge = document.getElementById('tempBadge');
             if (temp >= 22 && temp <= 28) {
                 tempBadge.innerText = 'NORMAL';
@@ -404,32 +470,35 @@
                 humBadge.innerText = 'BASAH';
                 humBadge.className = 'px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-bold';
             }
+        }
 
-            // 2. Status Alert
+        function updateStatusUI(status) {
             document.getElementById('statusBadge').innerText = (status.condition || 'IDEAL').toUpperCase();
             document.getElementById('statusMessage').innerText = status.message || 'Suhu dan kelembapan dalam rentang optimal.';
 
             const alertBox = document.getElementById('statusAlertBox');
-            if ((status.condition || '').includes('Bahaya')) {
+            const cond = status.condition || '';
+            if (cond.includes('Bahaya')) {
                 alertBox.className = 'card-panel rounded-2xl p-5 border-l-4 border-l-rose-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4';
                 document.getElementById('statusBadge').className = 'px-2.5 py-0.5 text-xs font-bold rounded-full bg-rose-500/20 text-rose-300';
-            } else if ((status.condition || '').includes('Waspada')) {
+            } else if (cond.includes('Waspada')) {
                 alertBox.className = 'card-panel rounded-2xl p-5 border-l-4 border-l-amber-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4';
                 document.getElementById('statusBadge').className = 'px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-500/20 text-amber-300';
             } else {
                 alertBox.className = 'card-panel rounded-2xl p-5 border-l-4 border-l-emerald-500 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4';
                 document.getElementById('statusBadge').className = 'px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300';
             }
+        }
 
-            // 3. Aktuator
+        function updateActuatorUI(actuators) {
             const isFan = !!actuators.fan;
             const isHum = !!actuators.humidifier;
-            const mode = actuators.mode || 'AUTO';
+            const mode  = actuators.mode || 'AUTO';
 
             document.getElementById('toggleFan').checked = isFan;
             document.getElementById('fanText').innerText = isFan ? 'ON (Mendinginkan)' : 'OFF';
             document.getElementById('fanStatusBadge').innerText = isFan ? 'NYALA' : 'MATI';
-            document.getElementById('fanStatusBadge').className = isFan 
+            document.getElementById('fanStatusBadge').className = isFan
                 ? 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold'
                 : 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold';
             document.getElementById('fanIcon').className = isFan ? 'w-4 h-4 text-emerald-400 spin-active' : 'w-4 h-4 text-slate-400';
@@ -437,12 +506,11 @@
             document.getElementById('toggleHumidifier').checked = isHum;
             document.getElementById('humText').innerText = isHum ? 'ON (Menyemprot)' : 'OFF';
             document.getElementById('humidifierStatusBadge').innerText = isHum ? 'NYALA' : 'MATI';
-            document.getElementById('humidifierStatusBadge').className = isHum 
+            document.getElementById('humidifierStatusBadge').className = isHum
                 ? 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold'
                 : 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold';
             document.getElementById('humIcon').className = isHum ? 'w-4 h-4 text-emerald-400 mist-active' : 'w-4 h-4 text-slate-400';
 
-            // Mode
             if (mode === 'AUTO') {
                 document.getElementById('btnAuto').className = 'px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all';
                 document.getElementById('btnManual').className = 'px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all';
@@ -453,14 +521,10 @@
                 document.getElementById('modeBadgeText').innerText = 'MANUAL (Kontrol Sakelar)';
             }
 
-            // Always update Live Monitoring Time to Current Clock Time on Sync
-            const currentTimeStr = new Date().toLocaleTimeString('id-ID');
-            document.getElementById('lastUpdated').innerText = 'Baru saja (' + currentTimeStr + ')';
-
             lucide.createIcons();
-            updateChart(data.history);
         }
 
+        // ── Chart ─────────────────────────────────────────────────────
         function initChart() {
             const ctx = document.getElementById('historyChart').getContext('2d');
             historyChart = new Chart(ctx, {
@@ -493,10 +557,11 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: { duration: 400 },
                     scales: {
                         x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } },
-                        yTemp: { position: 'left', ticks: { color: '#f43f5e' }, suggestedMin: 15, suggestedMax: 35 },
-                        yHum: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#06b6d4' }, suggestedMin: 50, suggestedMax: 100 }
+                        yTemp: { position: 'left',  ticks: { color: '#f43f5e' }, suggestedMin: 15, suggestedMax: 35 },
+                        yHum:  { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#06b6d4' }, suggestedMin: 50, suggestedMax: 100 }
                     }
                 }
             });
@@ -504,99 +569,154 @@
 
         function updateChart(historyObj) {
             if (!historyChart || !historyObj) return;
-
             const records = Object.values(historyObj);
             if (records.length === 0) return;
 
-            const labels = records.map(r => r.formatted_time || new Date(r.timestamp * 1000).toLocaleTimeString('id-ID'));
-            const temps = records.map(r => r.temperature);
-            const hums = records.map(r => r.humidity);
+            const labels = records.map(r => r.formatted_time || new Date((r.timestamp || 0) * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+            const temps  = records.map(r => r.temperature);
+            const hums   = records.map(r => r.humidity);
 
             historyChart.data.labels = labels;
             historyChart.data.datasets[0].data = temps;
             historyChart.data.datasets[1].data = hums;
             historyChart.update();
 
-            const avgTemp = (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1);
-            const avgHum = (hums.reduce((a, b) => a + b, 0) / hums.length).toFixed(1);
-
-            document.getElementById('avgTempText').innerText = avgTemp + '°C';
-            document.getElementById('avgHumText').innerText = avgHum + '%';
+            document.getElementById('avgTempText').innerText = (temps.reduce((a,b)=>a+b,0)/temps.length).toFixed(1) + '°C';
+            document.getElementById('avgHumText').innerText  = (hums.reduce((a,b)=>a+b,0)/hums.length).toFixed(1) + '%';
         }
 
+        // ── Kontrol Aktuator → Tulis ke Firebase ─────────────────────
         async function switchMode(mode) {
-            const res = await fetch('/api/actuators', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode })
-            });
-            const data = await res.json();
-            if (data.success) renderUI(data.environment);
+            // Optimistic update: UI langsung berubah tanpa nunggu Firebase
+            envData.actuators = { ...(envData.actuators || {}), mode: mode.toUpperCase() };
+            updateActuatorUI(envData.actuators);
+
+            try {
+                await update(ref(db, 'mushroom_environment/actuators'), { mode: mode.toUpperCase() });
+            } catch (e) {
+                console.warn('Firebase switchMode gagal, fallback ke API:', e);
+                try {
+                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+                    const data = await res.json();
+                    if (data.success) renderUI(data.environment);
+                } catch (e2) { console.error('Fallback API juga gagal:', e2); }
+            }
         }
 
         async function toggleActuator(actuator, value) {
-            const body = {};
-            body[actuator] = value;
-            const res = await fetch('/api/actuators', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const data = await res.json();
-            if (data.success) renderUI(data.environment);
+            // Optimistic update: UI langsung berubah + mode otomatis MANUAL
+            envData.actuators = { ...(envData.actuators || {}), [actuator]: value, mode: 'MANUAL' };
+            updateActuatorUI(envData.actuators);
+
+            try {
+                const updates = { [actuator]: value, mode: 'MANUAL' };
+                await update(ref(db, 'mushroom_environment/actuators'), updates);
+            } catch (e) {
+                console.warn('Firebase toggleActuator gagal, fallback ke API:', e);
+                try {
+                    const body = { [actuator]: value };
+                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    const data = await res.json();
+                    if (data.success) renderUI(data.environment);
+                } catch (e2) { console.error('Fallback API juga gagal:', e2); }
+            }
         }
 
-        function setSimPreset(temp, hum) {
+        // ── Simulasi → Tulis ke Firebase + data.json lokal ───────────
+        window.setSimPreset = function(temp, hum) {
             document.getElementById('simTempInput').value = temp;
             document.getElementById('simTempVal').innerText = temp.toFixed(1) + '°C';
             document.getElementById('simHumInput').value = hum;
             document.getElementById('simHumVal').innerText = hum.toFixed(1) + '%';
-            submitSimulation();
-        }
+            window.submitSimulation();
+        };
 
-        async function submitSimulation() {
+        window.submitSimulation = async function() {
             const temp = parseFloat(document.getElementById('simTempInput').value);
-            const hum = parseFloat(document.getElementById('simHumInput').value);
-            const res = await fetch('/api/simulate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ temperature: temp, humidity: hum })
-            });
-            const data = await res.json();
-            if (data.success) renderUI(data.environment);
-        }
+            const hum  = parseFloat(document.getElementById('simHumInput').value);
+            const now  = Math.floor(Date.now() / 1000);
+            const mode = envData.actuators?.mode || 'AUTO';
 
-        function toggleAutoStream(enabled) {
+            // Evaluasi aktuator (mirror logika PHP di sisi klien)
+            let fan = false, humidifier = false, condition = 'Ideal', message = '';
+            if (mode === 'AUTO') {
+                fan        = temp > 28.0;
+                humidifier = hum  < 80.0;
+                if (fan && humidifier) {
+                    condition = 'Bahaya: Panas & Kering';
+                    message   = `Suhu panas (${temp}°C > 28°C) & Kelembapan rendah (${hum}% < 80%). Kipas & Humidifier NYALA Otomatis!`;
+                } else if (fan) {
+                    condition = 'Waspada: Suhu Tinggi';
+                    message   = `Suhu panas (${temp}°C > 28°C). Kipas NYALA Otomatis mendinginkan kumbung.`;
+                } else if (humidifier) {
+                    condition = 'Waspada: Kelembapan Rendah';
+                    message   = `Kelembapan rendah (${hum}% < 80%). Humidifier NYALA Otomatis menyemprotkan embun.`;
+                } else if (hum > 90) {
+                    condition = 'Waspada: Kelembapan Tinggi';
+                    message   = `Kelembapan tinggi (${hum}% > 90%). Berisiko pembusukan baglog.`;
+                } else if (temp < 22) {
+                    condition = 'Waspada: Suhu Rendah';
+                    message   = `Suhu dingin (${temp}°C < 22°C). Pertumbuhan miselium melambat.`;
+                } else {
+                    condition = 'Ideal';
+                    message   = `Suhu (${temp}°C) & Kelembapan (${hum}%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).`;
+                }
+            } else {
+                fan        = !!envData.actuators?.fan;
+                humidifier = !!envData.actuators?.humidifier;
+                condition  = 'Manual Control';
+                message    = `Mode MANUAL Aktif: Kipas ${fan ? 'NYALA' : 'MATI'}, Humidifier ${humidifier ? 'NYALA' : 'MATI'}.`;
+            }
+
+            const formattedTime = new Date(now * 1000).toLocaleTimeString('id-ID');
+
+            // Tulis ke Firebase
+            try {
+                const updates = {};
+                updates['mushroom_environment/sensor'] = { temperature: temp, humidity: hum, updated_at: now };
+                if (mode === 'AUTO') {
+                    updates['mushroom_environment/actuators/fan']        = fan;
+                    updates['mushroom_environment/actuators/humidifier'] = humidifier;
+                }
+                updates['mushroom_environment/status'] = { condition, message };
+                updates[`mushroom_environment/history/record_${now}`] = {
+                    temperature: temp, humidity: hum, fan, humidifier,
+                    timestamp: now, formatted_time: formattedTime
+                };
+                await update(ref(db), updates);
+            } catch (e) {
+                console.warn('Firebase write gagal, fallback ke API lokal:', e);
+            }
+
+            // Juga tulis ke data.json lokal via Laravel API (sinkron dengan simulasi panel Wokwi)
+            try {
+                const res = await fetch('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temperature: temp, humidity: hum }) });
+                const data = await res.json();
+                if (data.success) renderUI(data.environment);
+            } catch (e) { /* Firebase sudah handle */ }
+        };
+
+        window.toggleAutoStream = function(enabled) {
             const statusText = document.getElementById('autoStreamStatusText');
             if (enabled) {
                 statusText.innerText = 'Live Simulation Berjalan...';
                 if (autoStreamInterval) clearInterval(autoStreamInterval);
-                
                 autoStreamInterval = setInterval(() => {
                     const curTemp = parseFloat(envData.sensor?.temperature || 26.5);
-                    const curHum = parseFloat(envData.sensor?.humidity || 85.0);
-
-                    const deltaTemp = (Math.random() * 0.8 - 0.4);
-                    const deltaHum = (Math.random() * 2.0 - 1.0);
-
-                    const newTemp = Math.min(Math.max(curTemp + deltaTemp, 20.0), 35.0);
-                    const newHum = Math.min(Math.max(curHum + deltaHum, 60.0), 95.0);
-
+                    const curHum  = parseFloat(envData.sensor?.humidity    || 85.0);
+                    const newTemp = Math.min(Math.max(curTemp + (Math.random() * 0.8 - 0.4), 20.0), 35.0);
+                    const newHum  = Math.min(Math.max(curHum  + (Math.random() * 2.0 - 1.0), 60.0), 95.0);
                     document.getElementById('simTempInput').value = newTemp.toFixed(1);
                     document.getElementById('simTempVal').innerText = newTemp.toFixed(1) + '°C';
                     document.getElementById('simHumInput').value = newHum.toFixed(1);
                     document.getElementById('simHumVal').innerText = newHum.toFixed(1) + '%';
-
-                    submitSimulation();
+                    window.submitSimulation();
                 }, 4000);
             } else {
                 statusText.innerText = 'Aktifkan Live Simulation';
-                if (autoStreamInterval) {
-                    clearInterval(autoStreamInterval);
-                    autoStreamInterval = null;
-                }
+                if (autoStreamInterval) { clearInterval(autoStreamInterval); autoStreamInterval = null; }
             }
-        }
+        };
     </script>
 </body>
 </html>
