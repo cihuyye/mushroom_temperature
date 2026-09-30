@@ -17,31 +17,51 @@ class MushroomController extends Controller
     private function getMushroomData()
     {
         $reference = $this->database->getReference('mushroom_environment');
-        $data = $reference->getValue();
+        $data = $reference->getValue() ?: [];
 
-        if (!$data) {
-            $default = [
-                'sensor' => [
-                    'temperature' => 26.5,
-                    'humidity' => 85.0,
-                    'updated_at' => time()
-                ],
-                'actuators' => [
-                    'fan' => false,
-                    'humidifier' => false,
-                    'mode' => 'AUTO'
-                ],
-                'status' => [
-                    'condition' => 'Ideal',
-                    'message' => 'Suhu (26.5°C) & Kelembapan (85%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).'
-                ],
-                'history' => []
-            ];
-
-            $reference->set($default);
-            return ['mushroom_environment' => $default];
+        if (!isset($data['sensor'])) {
+            $data['sensor'] = ['temperature' => 26.5, 'humidity' => 85.0, 'updated_at' => time()];
+        }
+        if (!isset($data['actuators'])) {
+            $data['actuators'] = ['fan' => false, 'humidifier' => false, 'mode' => 'AUTO'];
+        }
+        if (!isset($data['status'])) {
+            $data['status'] = ['condition' => 'Ideal', 'message' => 'Kondisi stabil.'];
+        }
+        if (!isset($data['history'])) {
+            $data['history'] = [];
         }
 
+        // Ambil data real dari node 'records' yang dikirim oleh Wokwi ESP32
+        try {
+            $records = $this->database->getReference('records')->getValue();
+            if ($records && is_array($records)) {
+                $validRecords = array_filter($records, function ($r) {
+                    return isset($r['timestamp']) && $r['timestamp'] > 1000000000;
+                });
+
+                if (!empty($validRecords)) {
+                    uasort($validRecords, fn($a, $b) => ($a['timestamp'] ?? 0) <=> ($b['timestamp'] ?? 0));
+                    $data['history'] = array_slice($validRecords, -20, 20, true);
+                    $latest = end($validRecords);
+                    if ($latest) {
+                        $data['sensor']['temperature'] = floatval($latest['temperature'] ?? $data['sensor']['temperature']);
+                        $data['sensor']['humidity']    = floatval($latest['humidity'] ?? $data['sensor']['humidity']);
+                        $data['sensor']['updated_at']   = intval($latest['timestamp'] ?? time());
+
+                        $mode = strtoupper($data['actuators']['mode'] ?? 'AUTO');
+                        if ($mode === 'AUTO') {
+                            $data['actuators']['fan']        = !empty($latest['fan']);
+                            $data['actuators']['humidifier'] = !empty($latest['humidifier']);
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently continue
+        }
+
+        $this->evaluateStatusAndActuators($data);
         return ['mushroom_environment' => $data];
     }
 
@@ -101,7 +121,20 @@ class MushroomController extends Controller
     public function index()
     {
         $data = $this->getMushroomData();
-        return view('dashboard', ['initialData' => $data['mushroom_environment']]);
+        $firebaseConfig = [
+            'apiKey'            => env('FIREBASE_API_KEY', 'AIzaSyCkF_T6BXW0deHfe3YK1WF-jn7U-HvvODg'),
+            'authDomain'        => env('FIREBASE_AUTH_DOMAIN', 'mushroom-monitoring-831ed.firebaseapp.com'),
+            'databaseURL'       => rtrim(env('FIREBASE_DATABASE_URL', 'https://mushroom-monitoring-831ed-default-rtdb.asia-southeast1.firebasedatabase.app/'), '/'),
+            'projectId'         => env('FIREBASE_PROJECT_ID', 'mushroom-monitoring-831ed'),
+            'storageBucket'     => env('FIREBASE_STORAGE_BUCKET', 'mushroom-monitoring-831ed.firebasestorage.app'),
+            'messagingSenderId' => env('FIREBASE_MESSAGING_SENDER_ID', '780912167030'),
+            'appId'             => env('FIREBASE_APP_ID', '1:780912167030:web:e946682a3d3e2911f2d757'),
+        ];
+
+        return view('dashboard', [
+            'initialData'    => $data['mushroom_environment'],
+            'firebaseConfig' => $firebaseConfig
+        ]);
     }
 
     public function getData()

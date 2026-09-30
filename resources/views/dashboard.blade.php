@@ -335,11 +335,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <script>
 
-        // ── Firebase Config (iot-dht22-faf47) ────────────────────────
-        const firebaseConfig = {
-            projectId: "iot-dht22-faf47",
-            databaseURL: "https://iot-dht22-faf47-default-rtdb.asia-southeast1.firebasedatabase.app"
-        };
+        // ── Firebase Config (dibaca otomatis dari .env via Controller) 
+        const firebaseConfig = @json($firebaseConfig);
 
         try {
             firebase.initializeApp(firebaseConfig);
@@ -382,7 +379,71 @@
 
         // ── Firebase Realtime Listeners ───────────────────────────────
         function startFirebaseListeners() {
-            // 1. Sensor (suhu & kelembapan)
+            // 0. Listener untuk node /records (langsung dari Wokwi ESP32)
+            db.ref('records').limitToLast(20).on('value', (snap) => {
+                const raw = snap.val();
+                if (raw) {
+                    const validRecords = {};
+                    let latestRecord = null;
+                    let latestTs = 0;
+
+                    Object.entries(raw).forEach(([k, v]) => {
+                        const ts = v.timestamp || 0;
+                        if (ts > 1000000000) {
+                            validRecords[k] = v;
+                            if (ts > latestTs) {
+                                latestTs = ts;
+                                latestRecord = v;
+                            }
+                        }
+                    });
+
+                    if (Object.keys(validRecords).length > 0) {
+                        envData.history = validRecords;
+                        updateChart(validRecords);
+                        updateSyncStatus(true);
+
+                        if (latestRecord) {
+                            const curMode = (envData.actuators?.mode || 'AUTO').toUpperCase();
+                            const temp = parseFloat(latestRecord.temperature);
+                            const hum  = parseFloat(latestRecord.humidity);
+
+                            envData.sensor = {
+                                temperature: temp,
+                                humidity: hum,
+                                updated_at: latestRecord.timestamp
+                            };
+                            updateSensorUI(envData.sensor);
+
+                            if (curMode === 'AUTO') {
+                                const fan        = !!latestRecord.fan;
+                                const humidifier = !!latestRecord.humidifier;
+                                envData.actuators = { fan, humidifier, mode: 'AUTO' };
+                                updateActuatorUI(envData.actuators);
+
+                                let condition = 'Ideal', message = '';
+                                if (fan && humidifier) {
+                                    condition = 'Bahaya: Panas & Kering';
+                                    message   = `Suhu panas (${temp}°C > 28°C) & Kelembapan rendah (${hum}% < 80%). Kipas & Humidifier NYALA!`;
+                                } else if (fan) {
+                                    condition = 'Waspada: Suhu Tinggi';
+                                    message   = `Suhu panas (${temp}°C > 28°C). Kipas NYALA Otomatis mendinginkan kumbung.`;
+                                } else if (humidifier) {
+                                    condition = 'Waspada: Kelembapan Rendah';
+                                    message   = `Kelembapan rendah (${hum}% < 80%). Humidifier NYALA Otomatis menyemprotkan embun.`;
+                                } else {
+                                    condition = 'Ideal';
+                                    message   = `Suhu (${temp}°C) & Kelembapan (${hum}%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).`;
+                                }
+                                envData.status = { condition, message };
+                                updateStatusUI(envData.status);
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 1. Sensor (suhu & kelembapan) jika ada di mushroom_environment
             db.ref('mushroom_environment/sensor').on('value', (snap) => {
                 const data = snap.val();
                 if (data) {
@@ -411,12 +472,14 @@
                 }
             });
 
-            // 4. Histori (20 data terakhir untuk grafik)
+            // 4. Histori jika ada di mushroom_environment/history (hanya jika records kosong)
             db.ref('mushroom_environment/history').limitToLast(20).on('value', (snap) => {
-                const history = {};
-                snap.forEach(child => { history[child.key] = child.val(); });
-                envData.history = history;
-                updateChart(history);
+                if (!envData.history || Object.keys(envData.history).length === 0) {
+                    const history = {};
+                    snap.forEach(child => { history[child.key] = child.val(); });
+                    envData.history = history;
+                    updateChart(history);
+                }
             });
         }
 
@@ -597,11 +660,29 @@
         }
 
         function updateChart(historyObj) {
-            if (!historyChart || !historyObj) return;
-            const records = Object.values(historyObj);
-            if (records.length === 0) return;
+            if (!historyChart) return;
+            const rawRecords = historyObj ? Object.values(historyObj) : [];
+            const records = rawRecords.filter(r => (r.timestamp || 0) > 1000000000);
+            if (records.length === 0) {
+                historyChart.data.labels = [];
+                historyChart.data.datasets[0].data = [];
+                historyChart.data.datasets[1].data = [];
+                historyChart.update();
+                document.getElementById('avgTempText').innerText = '-';
+                document.getElementById('avgHumText').innerText  = '-';
+                return;
+            }
 
-            const labels = records.map(r => r.formatted_time || new Date((r.timestamp || 0) * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+            // Urutkan histori dari waktu terlama ke terbaru
+            records.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+            // Utamakan konversi dari epoch timestamp ke waktu lokal browser (WIB)
+            const labels = records.map(r => {
+                if (r.timestamp) {
+                    return new Date(r.timestamp * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                }
+                return r.formatted_time || '-';
+            });
             const temps  = records.map(r => r.temperature);
             const hums   = records.map(r => r.humidity);
 
