@@ -335,19 +335,17 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <script>
 
-        // ── Firebase Config ──────────────────────────────────────────
+        // ── Firebase Config (iot-dht22-faf47) ────────────────────────
         const firebaseConfig = {
-            apiKey: "AIzaSyCkF_T6BXW0deHfe3YK1WF-jn7U-HvwODg",
-            authDomain: "mushroom-monitoring-831ed.firebaseapp.com",
-            databaseURL: "https://mushroom-monitoring-831ed-default-rtdb.asia-southeast1.firebasedatabase.app",
-            projectId: "mushroom-monitoring-831ed",
-            storageBucket: "mushroom-monitoring-831ed.firebasestorage.app",
-            messagingSenderId: "700912167030",
-            appId: "1:700912167030:web:e946682a3d3e2911f2d757",
-            measurementId: "G-7ZWC1FXVJ6"
+            projectId: "iot-dht22-faf47",
+            databaseURL: "https://iot-dht22-faf47-default-rtdb.asia-southeast1.firebasedatabase.app"
         };
 
-        firebase.initializeApp(firebaseConfig);
+        try {
+            firebase.initializeApp(firebaseConfig);
+        } catch(e) {
+            console.warn("Firebase init error:", e);
+        }
         const db = firebase.database();
 
         // ── State Lokal ───────────────────────────────────────────────

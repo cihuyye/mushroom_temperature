@@ -3,55 +3,51 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\File;
+use Kreait\Firebase\Contract\Database;
 
 class MushroomController extends Controller
 {
-    private function getDataPath()
+    protected $database;
+
+    public function __construct(Database $database)
     {
-        return base_path('data.json');
+        $this->database = $database;
     }
 
     private function getMushroomData()
     {
-        $path = $this->getDataPath();
-        if (!File::exists($path)) {
+        $reference = $this->database->getReference('mushroom_environment');
+        $data = $reference->getValue();
+
+        if (!$data) {
             $default = [
-                'mushroom_environment' => [
-                    'sensor' => [
-                        'temperature' => 26.5,
-                        'humidity' => 85.0,
-                        'updated_at' => time()
-                    ],
-                    'actuators' => [
-                        'fan' => false,
-                        'humidifier' => false,
-                        'mode' => 'AUTO'
-                    ],
-                    'status' => [
-                        'condition' => 'Ideal',
-                        'message' => 'Suhu (26.5°C) & Kelembapan (85%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).'
-                    ],
-                    'history' => []
-                ]
+                'sensor' => [
+                    'temperature' => 26.5,
+                    'humidity' => 85.0,
+                    'updated_at' => time()
+                ],
+                'actuators' => [
+                    'fan' => false,
+                    'humidifier' => false,
+                    'mode' => 'AUTO'
+                ],
+                'status' => [
+                    'condition' => 'Ideal',
+                    'message' => 'Suhu (26.5°C) & Kelembapan (85%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).'
+                ],
+                'history' => []
             ];
-            File::put($path, json_encode($default, JSON_PRETTY_PRINT));
-            return $default;
+
+            $reference->set($default);
+            return ['mushroom_environment' => $default];
         }
 
-        $content = File::get($path);
-        $data = json_decode($content, true);
-
-        if (!isset($data['mushroom_environment'])) {
-            $data = ['mushroom_environment' => $data];
-        }
-
-        return $data;
+        return ['mushroom_environment' => $data];
     }
 
     private function saveMushroomData($data)
     {
-        File::put($this->getDataPath(), json_encode($data, JSON_PRETTY_PRINT));
+        $this->database->getReference('mushroom_environment')->set($data['mushroom_environment']);
     }
 
     private function evaluateStatusAndActuators(&$env)
@@ -88,7 +84,7 @@ class MushroomController extends Controller
                 $message = "Suhu ({$temp}°C) & Kelembapan ({$hum}%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).";
             }
         } else {
-            // Mode MANUAL: Ikuti penuh sakelar pilihan pengguna!
+            // Mode MANUAL: Ikuti penuh sakelar pilihan pengguna
             $condition = 'Manual Control';
             $fanText = $fan ? 'Kipas NYALA' : 'Kipas MATI';
             $humText = $humidifier ? 'Humidifier NYALA' : 'Humidifier MATI';
@@ -176,6 +172,7 @@ class MushroomController extends Controller
             'formatted_time' => date('H:i:s', $now)
         ];
 
+        // Batasi histori maksimal 50 record terakhir
         if (count($env['history']) > 50) {
             $env['history'] = array_slice($env['history'], -50, 50, true);
         }
