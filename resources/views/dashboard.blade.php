@@ -57,6 +57,24 @@
             0%, 100% { opacity: 0.4; }
             50% { opacity: 1; }
         }
+
+        /* Animasi kilau halus saat data baru diterima dari Wokwi */
+        @keyframes value-flash {
+            0% {
+                transform: scale(1.08);
+                color: #34d399;
+                text-shadow: 0 0 16px rgba(52, 211, 153, 0.8);
+            }
+            100% {
+                transform: scale(1);
+                color: #ffffff;
+                text-shadow: none;
+            }
+        }
+        .animate-data-flash {
+            display: inline-block;
+            animation: value-flash 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
     </style>
 </head>
 <body class="min-h-screen pb-12 antialiased">
@@ -114,8 +132,13 @@
                 </div>
             </div>
 
-            <div class="text-xs text-slate-400 shrink-0">
-                Live Monitoring: <span id="lastUpdated" class="font-mono text-emerald-400 font-bold">Baru saja</span>
+            <div class="flex items-center gap-2.5 bg-slate-900/80 border border-slate-800 px-3.5 py-1.5 rounded-full text-xs shrink-0 shadow-inner">
+                <span class="relative flex h-2 w-2">
+                    <span id="liveDotPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span id="liveDot" class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span class="text-slate-400 font-medium">Live Wokwi:</span>
+                <span id="lastUpdated" class="font-mono text-emerald-400 font-bold">Menghubungkan...</span>
             </div>
         </div>
 
@@ -350,13 +373,17 @@
         let historyChart = null;
         let autoStreamInterval = null;
         let isWriting = false; // flag: suppress Firebase listener during local writes
+        let isDeviceOffline = false; // flag: true saat Wokwi tidak mengirim data >15s
+        let lastPacketTime = (envData.sensor?.updated_at) ? (envData.sensor.updated_at * 1000) : Date.now();
 
         // ── Inisialisasi Halaman (script posisi di akhir body, DOM sudah ada) ─
         lucide.createIcons();
         updateClock();
         setInterval(updateClock, 1000);
+        setInterval(updateLiveIndicator, 1000);
         initChart();
         renderUI(envData);
+        updateLiveIndicator();
         startFirebaseListeners();
 
         // ── Event Listeners untuk Toggle Aktuator ──────────────────
@@ -402,6 +429,7 @@
                         envData.history = validRecords;
                         updateChart(validRecords);
                         updateSyncStatus(true);
+                        recordPacketReceived();
 
                         if (latestRecord) {
                             const curMode = (envData.actuators?.mode || 'AUTO').toUpperCase();
@@ -450,6 +478,7 @@
                     envData.sensor = data;
                     updateSensorUI(data);
                     updateSyncStatus(true);
+                    recordPacketReceived();
                 }
             }, () => updateSyncStatus(false));
 
@@ -488,11 +517,187 @@
             if (connected) {
                 el.innerText = 'Firebase Terhubung';
                 el.className = 'text-emerald-400 font-semibold';
-                const now = new Date().toLocaleTimeString('id-ID');
-                document.getElementById('lastUpdated').innerText = 'Baru saja (' + now + ')';
             } else {
                 el.innerText = 'Offline';
                 el.className = 'text-rose-400 font-semibold';
+                const lastUpdatedEl = document.getElementById('lastUpdated');
+                if (lastUpdatedEl) {
+                    lastUpdatedEl.innerText = 'Firebase Terputus';
+                    lastUpdatedEl.className = 'font-mono text-rose-400 font-bold';
+                }
+            }
+        }
+
+        // ── Realtime Live Indicator & Flash Animasi ──────────────────
+        function recordPacketReceived() {
+            lastPacketTime = Date.now();
+            if (isDeviceOffline) {
+                isDeviceOffline = false;
+                renderUI(envData);
+            }
+            updateLiveIndicator();
+            triggerFlashAnimation();
+        }
+
+        function triggerFlashAnimation() {
+            const valTemp = document.getElementById('valTemp');
+            const valHum  = document.getElementById('valHum');
+            if (valTemp && valHum) {
+                valTemp.classList.remove('animate-data-flash');
+                valHum.classList.remove('animate-data-flash');
+                void valTemp.offsetWidth; // trigger reflow
+                valTemp.classList.add('animate-data-flash');
+                valHum.classList.add('animate-data-flash');
+                setTimeout(() => {
+                    valTemp.classList.remove('animate-data-flash');
+                    valHum.classList.remove('animate-data-flash');
+                }, 600);
+            }
+        }
+
+        function updateLiveIndicator() {
+            const lastUpdatedEl = document.getElementById('lastUpdated');
+            const liveDotEl     = document.getElementById('liveDot');
+            const liveDotPingEl = document.getElementById('liveDotPing');
+            if (!lastUpdatedEl) return;
+
+            if (!lastPacketTime) {
+                lastUpdatedEl.innerText = 'Menunggu data...';
+                lastUpdatedEl.className = 'font-mono text-slate-400 font-semibold';
+                if (liveDotEl) liveDotEl.className = 'relative inline-flex rounded-full h-2 w-2 bg-slate-500';
+                if (liveDotPingEl) liveDotPingEl.className = 'hidden';
+                if (!isDeviceOffline) {
+                    isDeviceOffline = true;
+                    renderOfflineUI();
+                }
+                return;
+            }
+
+            const elapsedSeconds = Math.max(0, Math.floor((Date.now() - lastPacketTime) / 1000));
+
+            if (elapsedSeconds < 15) {
+                // Sangat aktif / Realtime (< 15 detik)
+                if (isDeviceOffline) {
+                    isDeviceOffline = false;
+                    renderUI(envData);
+                }
+                if (elapsedSeconds <= 2) {
+                    lastUpdatedEl.innerText = 'Baru saja (Realtime)';
+                } else {
+                    lastUpdatedEl.innerText = `${elapsedSeconds}d lalu (Streaming)`;
+                }
+                lastUpdatedEl.className = 'font-mono text-emerald-400 font-bold';
+                if (liveDotEl) liveDotEl.className = 'relative inline-flex rounded-full h-2 w-2 bg-emerald-500';
+                if (liveDotPingEl) liveDotPingEl.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75';
+            } else if (elapsedSeconds < 60) {
+                // Sensor Idle / Terlambat kirim (15s - 60s)
+                if (!isDeviceOffline) {
+                    isDeviceOffline = true;
+                    renderOfflineUI();
+                }
+                lastUpdatedEl.innerText = `Wokwi Idle (${elapsedSeconds}d lalu)`;
+                lastUpdatedEl.className = 'font-mono text-amber-400 font-bold';
+                if (liveDotEl) liveDotEl.className = 'relative inline-flex rounded-full h-2 w-2 bg-amber-500';
+                if (liveDotPingEl) liveDotPingEl.className = 'hidden';
+            } else {
+                // Sensor Tidak Aktif / Offline (> 60 detik)
+                if (!isDeviceOffline) {
+                    isDeviceOffline = true;
+                    renderOfflineUI();
+                }
+                const minutes = Math.floor(elapsedSeconds / 60);
+                lastUpdatedEl.innerText = `Wokwi Offline (${minutes}m lalu)`;
+                lastUpdatedEl.className = 'font-mono text-rose-400 font-bold';
+                if (liveDotEl) liveDotEl.className = 'relative inline-flex rounded-full h-2 w-2 bg-rose-500';
+                if (liveDotPingEl) liveDotPingEl.className = 'hidden';
+            }
+        }
+
+        // ── Tampilan Khusus Saat Alat Wokwi Mati (Standar IoT) ─────────
+        function renderOfflineUI() {
+            // 1. Suhu: '--', badge OFFLINE, bar 0%
+            const valTemp = document.getElementById('valTemp');
+            const tempBadge = document.getElementById('tempBadge');
+            const barTemp = document.getElementById('barTemp');
+            if (valTemp) {
+                valTemp.innerText = '--';
+                valTemp.style.opacity = '0.4';
+            }
+            if (tempBadge) {
+                tempBadge.innerText = 'OFFLINE';
+                tempBadge.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 font-bold';
+            }
+            if (barTemp) barTemp.style.width = '0%';
+
+            // 2. Kelembapan: '--', badge OFFLINE, bar 0%
+            const valHum = document.getElementById('valHum');
+            const humBadge = document.getElementById('humBadge');
+            const barHum = document.getElementById('barHum');
+            if (valHum) {
+                valHum.innerText = '--';
+                valHum.style.opacity = '0.4';
+            }
+            if (humBadge) {
+                humBadge.innerText = 'OFFLINE';
+                humBadge.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 font-bold';
+            }
+            if (barHum) barHum.style.width = '0%';
+
+            // 3. Kipas: MATI (Standby), sakelar disabled
+            const toggleFan = document.getElementById('toggleFan');
+            const fanLabel = document.getElementById('fanLabel');
+            const fanText = document.getElementById('fanText');
+            const fanStatusBadge = document.getElementById('fanStatusBadge');
+            const fanIcon = document.getElementById('fanIcon');
+            if (toggleFan) {
+                toggleFan.checked = false;
+                toggleFan.disabled = true;
+            }
+            if (fanLabel) {
+                fanLabel.style.opacity = '0.3';
+                fanLabel.style.cursor = 'not-allowed';
+            }
+            if (fanText) fanText.innerText = 'OFF (Standby)';
+            if (fanStatusBadge) {
+                fanStatusBadge.innerText = 'OFFLINE';
+                fanStatusBadge.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 font-bold';
+            }
+            if (fanIcon) fanIcon.className = 'w-4 h-4 text-slate-500';
+
+            // 4. Humidifier: MATI (Standby), sakelar disabled
+            const toggleHum = document.getElementById('toggleHumidifier');
+            const humLabel = document.getElementById('humLabel');
+            const humText = document.getElementById('humText');
+            const humidifierStatusBadge = document.getElementById('humidifierStatusBadge');
+            const humIcon = document.getElementById('humIcon');
+            if (toggleHum) {
+                toggleHum.checked = false;
+                toggleHum.disabled = true;
+            }
+            if (humLabel) {
+                humLabel.style.opacity = '0.3';
+                humLabel.style.cursor = 'not-allowed';
+            }
+            if (humText) humText.innerText = 'OFF (Standby)';
+            if (humidifierStatusBadge) {
+                humidifierStatusBadge.innerText = 'OFFLINE';
+                humidifierStatusBadge.className = 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 font-bold';
+            }
+            if (humIcon) humIcon.className = 'w-4 h-4 text-slate-500';
+
+            // 5. Status Banner
+            const alertBox = document.getElementById('statusAlertBox');
+            const statusBadge = document.getElementById('statusBadge');
+            const statusMessage = document.getElementById('statusMessage');
+            if (alertBox) {
+                alertBox.className = 'card-panel rounded-2xl p-5 border-l-4 border-l-slate-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4';
+            }
+            if (statusBadge) {
+                statusBadge.innerText = 'ALAT OFFLINE';
+                statusBadge.className = 'px-2.5 py-0.5 text-xs font-bold rounded-full bg-slate-800 text-slate-400';
+            }
+            if (statusMessage) {
+                statusMessage.innerText = 'Perangkat ESP32 Wokwi tidak terdeteksi aktif. Semua sakelar dinonaktifkan (Standby).';
             }
         }
 
@@ -509,7 +714,10 @@
             const temp = parseFloat(sensor.temperature ?? 26.5);
             const hum  = parseFloat(sensor.humidity ?? 85.0);
 
-            document.getElementById('valTemp').innerText = temp.toFixed(1);
+            const elTemp = document.getElementById('valTemp');
+            const elHum  = document.getElementById('valHum');
+            if (elTemp) { elTemp.innerText = temp.toFixed(1); elTemp.style.opacity = '1'; }
+            if (elHum)  { elHum.innerText  = hum.toFixed(1);  elHum.style.opacity  = '1'; }
             document.getElementById('barTemp').style.width = Math.min(Math.max(((temp - 15) / 25) * 100, 0), 100) + '%';
 
             const tempBadge = document.getElementById('tempBadge');
