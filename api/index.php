@@ -25,13 +25,7 @@ foreach ($storageDirs as $dir) {
     }
 }
 
-// 3. Paksa Laravel Blade me-render compiled view di /tmp
-config([
-    'view.compiled' => '/tmp/storage/framework/views',
-    'cache.stores.file.path' => '/tmp/storage/framework/cache/data',
-]);
-
-// 4. Jika menggunakan FIREBASE_CREDENTIALS_JSON dari Env, tulis ke /tmp
+// 3. Tulis file firebase_credentials.json ke /tmp jika env string tersedia
 if ($firebaseJson = getenv('FIREBASE_CREDENTIALS_JSON')) {
     $credentialsPath = '/tmp/firebase_credentials.json';
     file_put_contents($credentialsPath, $firebaseJson);
@@ -40,8 +34,12 @@ if ($firebaseJson = getenv('FIREBASE_CREDENTIALS_JSON')) {
     $_SERVER['FIREBASE_CREDENTIALS'] = $credentialsPath;
 }
 
-// 5. Eksekusi Request Laravel
+// 4. Handle Incoming Request (Kernel akan mem-bootstrap service providers & config)
 $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
+
+// Set compiled view path secara aman via instance config $app
+$app['config']->set('view.compiled', '/tmp/storage/framework/views');
+$app['config']->set('cache.stores.file.path', '/tmp/storage/framework/cache/data');
 
 $response = $kernel->handle(
     $request = Illuminate\Http\Request::capture()
