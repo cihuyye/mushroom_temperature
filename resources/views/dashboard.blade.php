@@ -187,7 +187,7 @@
                         <p class="text-xs text-slate-400">Aktif jika Suhu > 28°C</p>
                     </div>
 
-                    <label class="relative inline-flex items-center cursor-pointer">
+                    <label id="fanLabel" class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" id="toggleFan" class="sr-only peer">
                         <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
                     </label>
@@ -211,7 +211,7 @@
                         <p class="text-xs text-slate-400">Aktif jika Kelembapan < 80%</p>
                     </div>
 
-                    <label class="relative inline-flex items-center cursor-pointer">
+                    <label id="humLabel" class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" id="toggleHumidifier" class="sr-only peer">
                         <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
                     </label>
@@ -228,10 +228,10 @@
                 <span id="modeBadgeText" class="text-slate-400 font-medium ml-2">AUTO (Otomatis Sensor)</span>
             </div>
             <div class="flex items-center gap-2 bg-slate-900 p-1 rounded-xl">
-                <button id="btnAuto" class="px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all">
+                <button id="btnAuto" class="px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all cursor-pointer">
                     AUTO
                 </button>
-                <button id="btnManual" class="px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all">
+                <button id="btnManual" class="px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all cursor-pointer">
                     MANUAL
                 </button>
             </div>
@@ -330,9 +330,10 @@
     </main>
 
     <!-- Script Logic (Firebase Realtime Database + Chart.js) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getDatabase, ref, onValue, update, query, limitToLast, connectDatabaseEmulator } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    <!-- Firebase Compat SDK (global) — pakai script biasa agar tidak ada timing issue module -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    <script>
 
         // ── Firebase Config ──────────────────────────────────────────
         const firebaseConfig = {
@@ -346,29 +347,35 @@
             measurementId: "G-7ZWC1FXVJ6"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
 
         // ── State Lokal ───────────────────────────────────────────────
         let envData = @json($initialData);
         let historyChart = null;
         let autoStreamInterval = null;
+        let isWriting = false; // flag: suppress Firebase listener during local writes
 
-        // ── Inisialisasi Halaman ──────────────────────────────────────
-        document.addEventListener('DOMContentLoaded', () => {
-            lucide.createIcons();
-            updateClock();
-            setInterval(updateClock, 1000);
-            initChart();
-            renderUI(envData); // Tampilkan data awal dari PHP/data.json
+        // ── Inisialisasi Halaman (script posisi di akhir body, DOM sudah ada) ─
+        lucide.createIcons();
+        updateClock();
+        setInterval(updateClock, 1000);
+        initChart();
+        renderUI(envData);
+        startFirebaseListeners();
 
-            startFirebaseListeners(); // Lalu langsung sync ke Firebase
-
-            // ── Event Listeners (lebih reliable dari onclick di module script)
-            document.getElementById('btnAuto').addEventListener('click', () => switchMode('AUTO'));
-            document.getElementById('btnManual').addEventListener('click', () => switchMode('MANUAL'));
-            document.getElementById('toggleFan').addEventListener('change', function() { toggleActuator('fan', this.checked); });
-            document.getElementById('toggleHumidifier').addEventListener('change', function() { toggleActuator('humidifier', this.checked); });
+        // ── Event Listeners untuk Toggle Aktuator ──────────────────
+        document.getElementById('toggleFan').addEventListener('change', function() {
+            toggleActuator('fan', this.checked);
+        });
+        document.getElementById('toggleHumidifier').addEventListener('change', function() {
+            toggleActuator('humidifier', this.checked);
+        });
+        document.getElementById('btnAuto').addEventListener('click', function() {
+            switchMode('AUTO');
+        });
+        document.getElementById('btnManual').addEventListener('click', function() {
+            switchMode('MANUAL');
         });
 
         function updateClock() {
@@ -378,7 +385,7 @@
         // ── Firebase Realtime Listeners ───────────────────────────────
         function startFirebaseListeners() {
             // 1. Sensor (suhu & kelembapan)
-            onValue(ref(db, 'mushroom_environment/sensor'), (snap) => {
+            db.ref('mushroom_environment/sensor').on('value', (snap) => {
                 const data = snap.val();
                 if (data) {
                     envData.sensor = data;
@@ -388,7 +395,7 @@
             }, () => updateSyncStatus(false));
 
             // 2. Status kondisi lingkungan
-            onValue(ref(db, 'mushroom_environment/status'), (snap) => {
+            db.ref('mushroom_environment/status').on('value', (snap) => {
                 const data = snap.val();
                 if (data) {
                     envData.status = data;
@@ -397,7 +404,8 @@
             });
 
             // 3. Aktuator (kipas, humidifier, mode)
-            onValue(ref(db, 'mushroom_environment/actuators'), (snap) => {
+            db.ref('mushroom_environment/actuators').on('value', (snap) => {
+                if (isWriting) return; // jangan override saat sedang menulis
                 const data = snap.val();
                 if (data) {
                     envData.actuators = data;
@@ -406,8 +414,7 @@
             });
 
             // 4. Histori (20 data terakhir untuk grafik)
-            const historyQ = query(ref(db, 'mushroom_environment/history'), limitToLast(20));
-            onValue(historyQ, (snap) => {
+            db.ref('mushroom_environment/history').limitToLast(20).on('value', (snap) => {
                 const history = {};
                 snap.forEach(child => { history[child.key] = child.val(); });
                 envData.history = history;
@@ -491,34 +498,58 @@
         }
 
         function updateActuatorUI(actuators) {
-            const isFan = !!actuators.fan;
-            const isHum = !!actuators.humidifier;
-            const mode  = actuators.mode || 'AUTO';
+            const isFan    = !!actuators.fan;
+            const isHum    = !!actuators.humidifier;
+            const mode     = (actuators.mode || 'AUTO').toUpperCase();
+            const isManual = mode === 'MANUAL';
 
-            document.getElementById('toggleFan').checked = isFan;
+            // ── Kipas ──
+            const toggleFan = document.getElementById('toggleFan');
+            const fanLabel  = document.getElementById('fanLabel');
+            toggleFan.checked  = isFan;
+            toggleFan.disabled = !isManual;  // dikunci di mode AUTO
+            if (fanLabel) {
+                fanLabel.style.opacity = isManual ? '1' : '0.4';
+                fanLabel.style.cursor  = isManual ? 'pointer' : 'not-allowed';
+                fanLabel.title = isManual ? 'Klik untuk ON/OFF Kipas' : 'Pindah ke mode MANUAL dulu';
+            }
             document.getElementById('fanText').innerText = isFan ? 'ON (Mendinginkan)' : 'OFF';
-            document.getElementById('fanStatusBadge').innerText = isFan ? 'NYALA' : 'MATI';
-            document.getElementById('fanStatusBadge').className = isFan
+            document.getElementById('fanStatusBadge').innerText   = isFan ? 'NYALA' : 'MATI';
+            document.getElementById('fanStatusBadge').className   = isFan
                 ? 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold'
                 : 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold';
-            document.getElementById('fanIcon').className = isFan ? 'w-4 h-4 text-emerald-400 spin-active' : 'w-4 h-4 text-slate-400';
+            document.getElementById('fanIcon').className = isFan
+                ? 'w-4 h-4 text-emerald-400 spin-active'
+                : 'w-4 h-4 text-slate-400';
 
-            document.getElementById('toggleHumidifier').checked = isHum;
+            // ── Humidifier ──
+            const toggleHum = document.getElementById('toggleHumidifier');
+            const humLabel  = document.getElementById('humLabel');
+            toggleHum.checked  = isHum;
+            toggleHum.disabled = !isManual;  // dikunci di mode AUTO
+            if (humLabel) {
+                humLabel.style.opacity = isManual ? '1' : '0.4';
+                humLabel.style.cursor  = isManual ? 'pointer' : 'not-allowed';
+                humLabel.title = isManual ? 'Klik untuk ON/OFF Humidifier' : 'Pindah ke mode MANUAL dulu';
+            }
             document.getElementById('humText').innerText = isHum ? 'ON (Menyemprot)' : 'OFF';
-            document.getElementById('humidifierStatusBadge').innerText = isHum ? 'NYALA' : 'MATI';
-            document.getElementById('humidifierStatusBadge').className = isHum
+            document.getElementById('humidifierStatusBadge').innerText   = isHum ? 'NYALA' : 'MATI';
+            document.getElementById('humidifierStatusBadge').className   = isHum
                 ? 'px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold'
                 : 'px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold';
-            document.getElementById('humIcon').className = isHum ? 'w-4 h-4 text-emerald-400 mist-active' : 'w-4 h-4 text-slate-400';
+            document.getElementById('humIcon').className = isHum
+                ? 'w-4 h-4 text-emerald-400 mist-active'
+                : 'w-4 h-4 text-slate-400';
 
-            if (mode === 'AUTO') {
-                document.getElementById('btnAuto').className = 'px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all';
-                document.getElementById('btnManual').className = 'px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all';
-                document.getElementById('modeBadgeText').innerText = 'AUTO (Otomatis Sensor)';
-            } else {
-                document.getElementById('btnAuto').className = 'px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all';
-                document.getElementById('btnManual').className = 'px-4 py-1.5 rounded-lg font-bold bg-amber-500 text-white transition-all';
+            // ── Tombol Mode ──
+            if (isManual) {
+                document.getElementById('btnAuto').className   = 'px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all cursor-pointer';
+                document.getElementById('btnManual').className = 'px-4 py-1.5 rounded-lg font-bold bg-amber-500 text-white transition-all cursor-pointer';
                 document.getElementById('modeBadgeText').innerText = 'MANUAL (Kontrol Sakelar)';
+            } else {
+                document.getElementById('btnAuto').className   = 'px-4 py-1.5 rounded-lg font-bold bg-emerald-500 text-white transition-all cursor-pointer';
+                document.getElementById('btnManual').className = 'px-4 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all cursor-pointer';
+                document.getElementById('modeBadgeText').innerText = 'AUTO (Otomatis Sensor)';
             }
 
             lucide.createIcons();
@@ -585,53 +616,86 @@
             document.getElementById('avgHumText').innerText  = (hums.reduce((a,b)=>a+b,0)/hums.length).toFixed(1) + '%';
         }
 
-        // ── Kontrol Aktuator → Tulis ke Firebase ─────────────────────
-        async function switchMode(mode) {
+        // ── Kontrol Aktuator ─────────────────────────────────────────
+        function switchMode(mode) {
             const upperMode = mode.toUpperCase();
-            envData.actuators = { ...(envData.actuators || {}), mode: upperMode };
-            updateActuatorUI(envData.actuators);
+            isWriting = true;
 
-            try {
-                await update(ref(db, 'mushroom_environment/actuators'), { mode: upperMode });
-            } catch (e) {
-                console.warn('Firebase switchMode gagal, fallback ke API:', e);
-                try {
-                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: upperMode }) });
-                    const data = await res.json();
-                    if (data.success) renderUI(data.environment);
-                } catch (e2) { console.error('Fallback API juga gagal:', e2); }
+            const temp = parseFloat(envData.sensor?.temperature || 26.5);
+            const hum  = parseFloat(envData.sensor?.humidity    || 85.0);
+
+            let fan, humidifier, condition, message;
+
+            if (upperMode === 'AUTO') {
+                fan        = temp > 28.0;
+                humidifier = hum  < 80.0;
+                if (fan && humidifier) {
+                    condition = 'Bahaya: Panas & Kering';
+                    message   = `Suhu panas (${temp}°C > 28°C) & Kelembapan rendah (${hum}% < 80%). Kipas & Humidifier NYALA Otomatis!`;
+                } else if (fan) {
+                    condition = 'Waspada: Suhu Tinggi';
+                    message   = `Suhu panas (${temp}°C > 28°C). Kipas NYALA Otomatis mendinginkan kumbung.`;
+                } else if (humidifier) {
+                    condition = 'Waspada: Kelembapan Rendah';
+                    message   = `Kelembapan rendah (${hum}% < 80%). Humidifier NYALA Otomatis menyemprotkan embun.`;
+                } else {
+                    condition = 'Ideal';
+                    message   = `Suhu (${temp}°C) & Kelembapan (${hum}%) optimal. Kipas & Humidifier MATI (Kondisi Stabil).`;
+                }
+            } else {
+                fan        = !!envData.actuators?.fan;
+                humidifier = !!envData.actuators?.humidifier;
+                condition  = 'Manual Control';
+                message    = `Mode MANUAL Aktif: Kipas ${fan ? 'NYALA' : 'MATI'}, Humidifier ${humidifier ? 'NYALA' : 'MATI'}.`;
             }
+
+            // Update lokal & UI langsung
+            envData.actuators = { fan, humidifier, mode: upperMode };
+            envData.status    = { condition, message };
+            updateActuatorUI(envData.actuators);
+            updateStatusUI(envData.status);
+
+            // Tulis ke Firebase
+            db.ref('mushroom_environment').update({
+                'actuators': { fan, humidifier, mode: upperMode },
+                'status':    { condition, message }
+            }).catch(e => console.warn('Firebase switchMode gagal:', e));
+
+            setTimeout(() => { isWriting = false; }, 2000);
         }
 
-        async function toggleActuator(actuator, value) {
-            envData.actuators = { ...(envData.actuators || {}), [actuator]: value, mode: 'MANUAL' };
-            updateActuatorUI(envData.actuators);
-
-            try {
-                const updates = { 
-                    [`mushroom_environment/actuators/${actuator}`]: value,
-                    'mushroom_environment/actuators/mode': 'MANUAL'
-                };
-                const fan = !!envData.actuators.fan;
-                const humidifier = !!envData.actuators.humidifier;
-                updates['mushroom_environment/status'] = {
-                    condition: 'Manual Control',
-                    message: `Mode MANUAL Aktif: Kipas ${fan ? 'NYALA' : 'MATI'}, Humidifier ${humidifier ? 'NYALA' : 'MATI'}.`
-                };
-
-                await update(ref(db), updates);
-            } catch (e) {
-                console.warn('Firebase toggleActuator gagal, fallback ke API:', e);
-                try {
-                    const body = { [actuator]: value, mode: 'MANUAL' };
-                    const res = await fetch('/api/actuators', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                    const data = await res.json();
-                    if (data.success) renderUI(data.environment);
-                } catch (e2) { console.error('Fallback API juga gagal:', e2); }
+        function toggleActuator(actuator, value) {
+            // Hanya bisa diklik di mode MANUAL
+            // (di mode AUTO toggle sudah disabled, tapi double-check di sini)
+            if ((envData.actuators?.mode || 'AUTO').toUpperCase() !== 'MANUAL') {
+                const el = document.getElementById(actuator === 'fan' ? 'toggleFan' : 'toggleHumidifier');
+                if (el) el.checked = !!envData.actuators?.[actuator]; // kembalikan ke state sebelumnya
+                return;
             }
+
+            isWriting = true;
+            const fan        = actuator === 'fan'        ? value : !!envData.actuators?.fan;
+            const humidifier = actuator === 'humidifier' ? value : !!envData.actuators?.humidifier;
+            const condition  = 'Manual Control';
+            const message    = `Mode MANUAL Aktif: Kipas ${fan ? 'NYALA' : 'MATI'}, Humidifier ${humidifier ? 'NYALA' : 'MATI'}.`;
+
+            // Update lokal & UI langsung (optimistic)
+            envData.actuators = { fan, humidifier, mode: 'MANUAL' };
+            envData.status    = { condition, message };
+            updateActuatorUI(envData.actuators);
+            updateStatusUI(envData.status);
+
+            // Tulis ke Firebase
+            db.ref('mushroom_environment').update({
+                'actuators': { fan, humidifier, mode: 'MANUAL' },
+                'status':    { condition, message }
+            }).catch(e => console.warn('Firebase toggleActuator gagal:', e));
+
+            setTimeout(() => { isWriting = false; }, 2000);
         }
 
-        // ── Simulasi → Tulis ke Firebase + data.json lokal ───────────
+
+        // ── Simulasi ─────────────────────────────────────────────────
         window.setSimPreset = function(temp, hum) {
             document.getElementById('simTempInput').value = temp;
             document.getElementById('simTempVal').innerText = temp.toFixed(1) + '°C';
@@ -640,13 +704,12 @@
             window.submitSimulation();
         };
 
-        window.submitSimulation = async function() {
+        window.submitSimulation = function() {
             const temp = parseFloat(document.getElementById('simTempInput').value);
             const hum  = parseFloat(document.getElementById('simHumInput').value);
             const now  = Math.floor(Date.now() / 1000);
-            const mode = envData.actuators?.mode || 'AUTO';
+            const mode = (envData.actuators?.mode || 'AUTO').toUpperCase();
 
-            // Evaluasi aktuator (mirror logika PHP di sisi klien)
             let fan = false, humidifier = false, condition = 'Ideal', message = '';
             if (mode === 'AUTO') {
                 fan        = temp > 28.0;
@@ -678,31 +741,17 @@
             }
 
             const formattedTime = new Date(now * 1000).toLocaleTimeString('id-ID');
-
-            // Tulis ke Firebase
-            try {
-                const updates = {};
-                updates['mushroom_environment/sensor'] = { temperature: temp, humidity: hum, updated_at: now };
-                if (mode === 'AUTO') {
-                    updates['mushroom_environment/actuators/fan']        = fan;
-                    updates['mushroom_environment/actuators/humidifier'] = humidifier;
-                }
-                updates['mushroom_environment/status'] = { condition, message };
-                updates[`mushroom_environment/history/record_${now}`] = {
-                    temperature: temp, humidity: hum, fan, humidifier,
-                    timestamp: now, formatted_time: formattedTime
-                };
-                await update(ref(db), updates);
-            } catch (e) {
-                console.warn('Firebase write gagal, fallback ke API lokal:', e);
+            const updates = {};
+            updates['sensor'] = { temperature: temp, humidity: hum, updated_at: now };
+            if (mode === 'AUTO') {
+                updates['actuators/fan']        = fan;
+                updates['actuators/humidifier'] = humidifier;
             }
+            updates['status'] = { condition, message };
+            updates[`history/record_${now}`] = { temperature: temp, humidity: hum, fan, humidifier, timestamp: now, formatted_time: formattedTime };
 
-            // Juga tulis ke data.json lokal via Laravel API (sinkron dengan simulasi panel Wokwi)
-            try {
-                const res = await fetch('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temperature: temp, humidity: hum }) });
-                const data = await res.json();
-                if (data.success) renderUI(data.environment);
-            } catch (e) { /* Firebase sudah handle */ }
+            db.ref('mushroom_environment').update(updates)
+                .catch(e => console.warn('Firebase simulasi gagal:', e));
         };
 
         window.toggleAutoStream = function(enabled) {

@@ -119,20 +119,18 @@ class MushroomController extends Controller
         $data = $this->getMushroomData();
         $env = &$data['mushroom_environment'];
 
-        if ($request->has('mode')) {
-            $env['actuators']['mode'] = strtoupper($request->input('mode'));
-        }
-
         if ($request->has('fan')) {
             $env['actuators']['fan'] = filter_var($request->input('fan'), FILTER_VALIDATE_BOOLEAN);
-            // Ketika sakelar kipas diubah secara manual, otomatis beralih ke mode MANUAL
             $env['actuators']['mode'] = 'MANUAL';
         }
 
         if ($request->has('humidifier')) {
             $env['actuators']['humidifier'] = filter_var($request->input('humidifier'), FILTER_VALIDATE_BOOLEAN);
-            // Ketika sakelar humidifier diubah secara manual, otomatis beralih ke mode MANUAL
             $env['actuators']['mode'] = 'MANUAL';
+        }
+
+        if ($request->has('mode')) {
+            $env['actuators']['mode'] = strtoupper($request->input('mode'));
         }
 
         $this->evaluateStatusAndActuators($env);

@@ -6,13 +6,13 @@
             "updated_at": 1790611914
         },
         "actuators": {
-            "fan": false,
-            "humidifier": false,
-            "mode": "AUTO"
+            "fan": true,
+            "humidifier": true,
+            "mode": "MANUAL"
         },
         "status": {
-            "condition": "Ideal",
-            "message": "Suhu (26.5\u00b0C) & Kelembapan (85%) optimal. Kipas & Humidifier MATI (Kondisi Stabil)."
+            "condition": "Manual Control",
+            "message": "Mode MANUAL Aktif: Kipas NYALA, Humidifier NYALA dikontrol secara manual oleh pengguna."
         },
         "history": {
             "rec_1": {
